@@ -29,7 +29,7 @@ class Particle(object):
     """ Represents a hypothesis (particle) of the robot's pose consisting of x,y and theta (yaw)
         Attributes:
             x: the x-coordinate of the hypothesis relative to the map frame
-            y: the y-coordinate of the hypothesis relative ot the map frame
+            y: the y-coordinate of the hypothesis relative to the map frame
             theta: the yaw of the hypothesis relative to the map frame
             w: the particle weight (the class does not ensure that particle weights are normalized
     """
@@ -40,6 +40,8 @@ class Particle(object):
             y: the y-coordinate of the hypothesis relative ot the map frame
             theta: the yaw of the hypothesis relative to the map frame
             w: the particle weight (the class does not ensure that particle weights are normalized """ 
+        # TODO: Determine what the x,y coordinates actually are in terms of what the map frame _is_
+        # TODO: Determine how theta works (0 to 360 vs -180 to 180, and where 0 is, which way is +, which is -)
         self.w = w
         self.theta = theta
         self.x = x
@@ -315,7 +317,14 @@ if __name__ == '__main__':
     n = ParticleFilter()
     r = rospy.Rate(5)
 
+    # OF = OccupancyField()
+    # TODO: play with how occupancy field works
+
     while not(rospy.is_shutdown()):
         # in the main loop all we do is continuously broadcast the latest map to odom transform
         n.transform_helper.send_last_map_to_odom_transform()
+
+        # OF.get_closest_obstacle_distance(100,100)
+        # TODO: Play with how occupancy field works
+        
         r.sleep()
