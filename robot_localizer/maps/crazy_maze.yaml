@@ -1,0 +1,7 @@
+image: crazy_maze.pgm
+resolution: 0.020000
+origin: [-26.760000, -16.520000, 0.000000]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+
