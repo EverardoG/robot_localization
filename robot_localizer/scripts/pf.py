@@ -42,7 +42,7 @@ class Particle(object):
             x: the x-coordinate of the hypothesis relative to the map frame
             y: the y-coordinate of the hypothesis relative ot the map frame
             theta: the yaw of the hypothesis relative to the map frame
-            w: the particle weight (the class does not ensure that particle weights are normalized """ 
+            w: the particle weight (the class does not ensure that particle weights are normalized """
         # TODO: Determine what the x,y coordinates actually are in terms of what the map frame _is_
         # TODO: Determine how theta works (0 to 360 vs -180 to 180, and where 0 is, which way is +, which is -)
         self.w = w
@@ -86,7 +86,7 @@ class ParticleFilter:
         self.base_frame = "base_link"   # the frame of the robot base
         self.map_frame = "map"          # the name of the map coordinate frame
         self.odom_frame = "odom"        # the name of the odometry coordinate frame
-        self.scan_topic = "scan"        # the topic where we will get laser scans from 
+        self.scan_topic = "scan"        # the topic where we will get laser scans from
 
         self.n_particles = 300          # the number of particles to use
 
@@ -101,12 +101,13 @@ class ParticleFilter:
 
         # pose_listener responds to selection of a new approximate robot location (for instance using rviz)
         rospy.Subscriber("initialpose", PoseWithCovarianceStamped, self.update_initial_pose)
-
         # publish the current particle cloud.  This enables viewing particles in rviz.
         self.particle_pub = rospy.Publisher("particlecloud", PoseArray, queue_size=10)
-
         # laser_subscriber listens for data from the lidar
         rospy.Subscriber(self.scan_topic, LaserScan, self.scan_received)
+
+        # publish our hypetheses points
+        self.hypothesis_pub = rospy.Publisher("hypotheses", PoseArray, queue_size=10)
 
         # enable listening for and broadcasting coordinate transforms
         self.tf_listener = TransformListener()
@@ -223,24 +224,24 @@ class ParticleFilter:
         #check whether the algorithm should assume inital conditions or not
         if estimate_location == False:
             #create an index to track the x cordinate of the particles being created
-            
+
             #calculate the number of particles to place widthwize vs hightwize along the map based on the number of particles and the dimensions of the map
             num_particles_x = math.sqrt(self.n_particles)
-            num_particles_y = num_particles_x 
+            num_particles_y = num_particles_x
 
 
 
             index_x = -20
             #iterate over the map to place points in a uniform grid
             while index_x < 15:
-                
+
                 index_y = -20
                 while index_y < 15:
                     #create a particle at the location with a random orientation
                     new_particle = Particle(index_x,index_y,uniform(0,2 * math.pi))
                     #add the particle to the particle array
                     self.particle_cloud.append(new_particle)
-                    
+
                     #increment the index to place the next particle
                     index_y += 35/(num_particles_y)
                 #increment index to place next column of particles
@@ -334,14 +335,31 @@ if __name__ == '__main__':
     n = ParticleFilter()
     r = rospy.Rate(5)
 
-    # OF = OccupancyField()
-    # TODO: play with how occupancy field works
+    # Make a list of points to try publishing
+    particle_list = []
+    for i in range(20):
+        new_particle = Particle(20.0,20.0,np.random.uniform(0,2 * math.pi))
+        particle_list.append(new_particle.as_pose())
 
     while not(rospy.is_shutdown()):
-        # in the main loop all we do is continuously broadcast the latest map to odom transform
-        n.transform_helper.send_last_map_to_odom_transform()
+        try:
+            rospy.loginfo("heartbeat")
+            # in the main loop all we do is continuously broadcast the latest map to odom transform
+            n.transform_helper.send_last_map_to_odom_transform()
 
-        # OF.get_closest_obstacle_distance(100,100)
-        # TODO: Play with how occupancy field works
-        
-        r.sleep()
+            # trying to publish some points
+            # self.hypothesis_pub.publish(PoseArray(header=Header(stamp=rospy.Time.now(),
+            #                             frame_id=self.map_frame),
+            #                     poses=particles_conv))
+
+            n.hypothesis_pub.publish(PoseArray(header=Header(stamp=rospy.Time.now(),
+                                        frame_id=n.map_frame),
+                                        poses=particle_list))
+
+            # temp = OF.get_closest_obstacle_distance(100,100)
+            # help(temp)
+            # TODO: Play with how occupancy field works
+
+            r.sleep()
+        except rospy.exceptions.ROSTimeMovedBackwardsException:
+            pass
