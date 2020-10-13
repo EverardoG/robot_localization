@@ -30,18 +30,18 @@ from occupancy_field import OccupancyField
 from helper_functions import TFHelper
 from enum import Enum
 
-def build_lidar_marker(x,y,marker_id):
+def build_lidar_marker(x, y, marker_id, frame_id, namespace, color_rgb=(0.0,0.0,1.0)):
     """ A helper function for visualizing lidar data """
     marker = Marker()
-    marker.header.frame_id = "base_link";
+    marker.header.frame_id = frame_id # "base_link";
     marker.header.stamp = rospy.Time.now();
-    marker.ns = "lidar_visualization";
+    marker.ns = namespace # "lidar_visualization";
     marker.id = marker_id
     marker.type = Marker.SPHERE;
     marker.action = Marker.ADD;
     marker.pose.position.x = x
     marker.pose.position.y = y
-    marker.pose.position.z = 0.5;
+    marker.pose.position.z = 0.0;
     marker.pose.orientation.x = 0.0;
     marker.pose.orientation.y = 0;
     marker.pose.orientation.z = 0;
@@ -50,15 +50,16 @@ def build_lidar_marker(x,y,marker_id):
     marker.scale.y = 0.1
     marker.scale.z = 0.1
     marker.color.a = 0.9 # Don't forget to set the alpha!
-    marker.color.r = 0.0
-    marker.color.g = 0.0
-    marker.color.b = 1.0
+    marker.color.r = color_rgb[0]
+    marker.color.g = color_rgb[1]
+    marker.color.b = color_rgb[2]
 
     return marker
 
 class ParticleInitOptions(Enum):
     UNIFORM_DISTRIBUTION = 0
     UNIFORM_DISTRIBUTION_HARDCODED = 1
+    SINGLE_PARTICLE = 2 # For testing lidar transformations
 
 class Particle(object):
     """ Represents a hypothesis (particle) of the robot's pose consisting of x,y and theta (yaw)
@@ -98,7 +99,7 @@ class Particle(object):
         marker.action = Marker.ADD;
         marker.pose.position.x = self.x
         marker.pose.position.y = self.y
-        marker.pose.position.z = 0.5;
+        marker.pose.position.z = 0.0;
         marker.pose.orientation.x = orientation_tuple[0];
         marker.pose.orientation.y = orientation_tuple[1];
         marker.pose.orientation.z = orientation_tuple[2];
@@ -147,10 +148,11 @@ class ParticleFilter:
         self.scan_topic = "scan"        # the topic where we will get laser scans from
 
         self.n_particles = 300          # the number of particles to use
-        self.particle_init_options = ParticleInitOptions.UNIFORM_DISTRIBUTION_HARDCODED
+        self.particle_init_options = ParticleInitOptions.SINGLE_PARTICLE
 
         self.d_thresh = 0.2             # the amount of linear movement before performing an update
         self.a_thresh = math.pi/6       # the amount of angular movement before performing an update
+
 
         self.laser_max_distance = 2.0   # maximum penalty to assess in the likelihood field model
 
@@ -169,6 +171,8 @@ class ParticleFilter:
         self.hypothesis_pub = rospy.Publisher("hypotheses", MarkerArray, queue_size=10)
         # Publish the lidar scan that pf.py sees
         self.lidar_pub = rospy.Publisher("lidar_visualization", MarkerArray, queue_size=10)
+        # Publish the lidar scan projected from the first hypothesis
+        self.projected_lidar_pub = rospy.Publisher("projected_lidar_visualization", MarkerArray, queue_size=10)
 
         # enable listening for and broadcasting coordinate transforms
         self.tf_listener = TransformListener()
@@ -268,26 +272,38 @@ class ParticleFilter:
         # Build up an array of lidar markers for visualization
         lidar_markers = []
         for index, xy_point in enumerate(relative_to_robot):
-            lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index))
+            lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index, "base_link", "lidar_visualization"))
 
         # Publish lidar points for visualization
         self.lidar_pub.publish(MarkerArray(markers=lidar_markers))
 
+        # print(relative_to_robot)
+
         # For every particle (hypothesis) we have
-        for particle in particle_cloud:
-            # Combine the xy positions of the scan with the xy w of the hypothesis
-            # Rotation matrix could be helpful here (https://en.wikipedia.org/wiki/Rotation_matrix)
+        # for particle in particle_cloud:
+        particle = self.particle_cloud[0]
+        # Combine the xy positions of the scan with the xy w of the hypothesis
+        # Rotation matrix could be helpful here (https://en.wikipedia.org/wiki/Rotation_matrix)
 
-            # Build our rotation matrix
-            R = np.array([np.cos(particle.theta), -np.sin(particle.theta)],[np.sin(particle.theta), np.cos(particle.theta)])
+        # Build our rotation matrix
+        R = np.array([[np.cos(particle.theta), -np.sin(particle.theta)],[np.sin(particle.theta), np.cos(particle.theta)]])
 
-            # Rotate the points according to particle orientation
-            relative_to_particle = R.T*relative_to_robot
+        # Rotate the points according to particle orientation
+        relative_to_particle = relative_to_robot.dot(R)
 
-            # Transform points so that they're relative to the particle
+        # Translate points to be relative to map origin
+        relative_to_map = deepcopy(relative_to_particle)
+        relative_to_map[:,0:1] = relative_to_map[:,0:1] + particle.x * np.ones((relative_to_map.shape[0],1))
+        relative_to_map[:,1:2] = relative_to_map[:,1:2] + particle.y * np.ones((relative_to_map.shape[0],1))
 
+        # Visualize the projected points
+        projected_lidar_markers = []
+        for index, xy_point in enumerate(relative_to_map):
+            projected_lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index, "map", "projected_lidar_visualization"))
 
-            # Take the absolute difference between the scan and where points should be for each projected point
+        self.projected_lidar_pub.publish(MarkerArray(markers=projected_lidar_markers))
+
+        # Take the absolute difference between the scan and where points should be for each projected point
         pass
 
     @staticmethod
@@ -362,6 +378,10 @@ class ParticleFilter:
                     for i in range(5):
                         new_particle = Particle(x,y,np.random.uniform(0,2 * math.pi))
                         self.particle_cloud.append(new_particle)
+
+        elif self.particle_init_options == ParticleInitOptions.SINGLE_PARTICLE:
+            new_particle = Particle(1.0,1.0,0.0)
+            self.particle_cloud.append(new_particle)
 
         # TODO: Optional, make a ParticleInitOptions for setting initial conditions
 
