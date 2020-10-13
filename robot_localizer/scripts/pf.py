@@ -7,6 +7,7 @@ import rospy
 from std_msgs.msg import Header, String
 from sensor_msgs.msg import LaserScan, PointCloud
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, PoseArray, Pose, Point, Quaternion
+from visualization_msgs.msg import MarkerArray, Marker
 from nav_msgs.srv import GetMap
 from copy import deepcopy
 
@@ -27,6 +28,38 @@ from numpy.random import random_sample
 from sklearn.neighbors import NearestNeighbors
 from occupancy_field import OccupancyField
 from helper_functions import TFHelper
+from enum import Enum
+
+def build_lidar_marker(x, y, marker_id, frame_id, namespace, color_rgb=(0.0,0.0,1.0)):
+    """ A helper function for visualizing lidar data """
+    marker = Marker()
+    marker.header.frame_id = frame_id # "base_link";
+    marker.header.stamp = rospy.Time.now();
+    marker.ns = namespace # "lidar_visualization";
+    marker.id = marker_id
+    marker.type = Marker.SPHERE;
+    marker.action = Marker.ADD;
+    marker.pose.position.x = x
+    marker.pose.position.y = y
+    marker.pose.position.z = 0.0;
+    marker.pose.orientation.x = 0.0;
+    marker.pose.orientation.y = 0;
+    marker.pose.orientation.z = 0;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = 0.1
+    marker.scale.y = 0.1
+    marker.scale.z = 0.1
+    marker.color.a = 0.9 # Don't forget to set the alpha!
+    marker.color.r = color_rgb[0]
+    marker.color.g = color_rgb[1]
+    marker.color.b = color_rgb[2]
+
+    return marker
+
+class ParticleInitOptions(Enum):
+    UNIFORM_DISTRIBUTION = 0
+    UNIFORM_DISTRIBUTION_HARDCODED = 1
+    SINGLE_PARTICLE = 2 # For testing lidar transformations
 
 class Particle(object):
     """ Represents a hypothesis (particle) of the robot's pose consisting of x,y and theta (yaw)
@@ -39,12 +72,10 @@ class Particle(object):
 
     def __init__(self,x=0.0,y=0.0,theta=0.0,w=1.0):
         """ Construct a new Particle
-            x: the x-coordinate of the hypothesis relative to the map frame
-            y: the y-coordinate of the hypothesis relative ot the map frame
-            theta: the yaw of the hypothesis relative to the map frame
-            w: the particle weight (the class does not ensure that particle weights are normalized """ 
-        # TODO: Determine what the x,y coordinates actually are in terms of what the map frame _is_
-        # TODO: Determine how theta works (0 to 360 vs -180 to 180, and where 0 is, which way is +, which is -)
+            x: the x-coordinate of the hypothesis relative to the map frame (meters)
+            y: the y-coordinate of the hypothesis relative ot the map frame (meters)
+            theta: the yaw of the hypothesis relative to the map frame (radians)
+            w: the particle weight (the class does not ensure that particle weights are normalized """
         self.w = w
         self.theta = theta
         self.x = x
@@ -54,6 +85,34 @@ class Particle(object):
         """ A helper function to convert a particle to a geometry_msgs/Pose message """
         orientation_tuple = tf.transformations.quaternion_from_euler(0,0,self.theta)
         return Pose(position=Point(x=self.x,y=self.y,z=0), orientation=Quaternion(x=orientation_tuple[0], y=orientation_tuple[1], z=orientation_tuple[2], w=orientation_tuple[3]))
+
+    def as_marker(self, marker_id):
+        """ A helper function to convert to a particle to a visualization_msgs/Marker message """
+        orientation_tuple = tf.transformations.quaternion_from_euler(0,0,self.theta)
+        # return Pose(position=Point(x=self.x,y=self.y,z=0), orientation=Quaternion(x=orientation_tuple[0], y=orientation_tuple[1], z=orientation_tuple[2], w=orientation_tuple[3]))
+        marker = Marker()
+        marker.header.frame_id = "map";
+        marker.header.stamp = rospy.Time.now();
+        marker.ns = "hypotheses_visualization";
+        marker.id = marker_id
+        marker.type = Marker.ARROW;
+        marker.action = Marker.ADD;
+        marker.pose.position.x = self.x
+        marker.pose.position.y = self.y
+        marker.pose.position.z = 0.0;
+        marker.pose.orientation.x = orientation_tuple[0];
+        marker.pose.orientation.y = orientation_tuple[1];
+        marker.pose.orientation.z = orientation_tuple[2];
+        marker.pose.orientation.w = orientation_tuple[3];
+        marker.scale.x = 0.1 # How long the arrow is
+        marker.scale.y = self.w/50.0 # arrow width - you can have a wide arrow that isn't tall. Arrow is not necessarily a circle
+        marker.scale.z = self.w/50.0
+        marker.color.a = 0.9 # Don't forget to set the alpha!
+        marker.color.r = 0.0
+        marker.color.g = 0.0
+        marker.color.b = 1.0
+
+        return marker
 
     # TODO: define additional helper functions if needed
 
@@ -86,12 +145,14 @@ class ParticleFilter:
         self.base_frame = "base_link"   # the frame of the robot base
         self.map_frame = "map"          # the name of the map coordinate frame
         self.odom_frame = "odom"        # the name of the odometry coordinate frame
-        self.scan_topic = "scan"        # the topic where we will get laser scans from 
+        self.scan_topic = "scan"        # the topic where we will get laser scans from
 
         self.n_particles = 300          # the number of particles to use
+        self.particle_init_options = ParticleInitOptions.SINGLE_PARTICLE
 
         self.d_thresh = 0.2             # the amount of linear movement before performing an update
         self.a_thresh = math.pi/6       # the amount of angular movement before performing an update
+
 
         self.laser_max_distance = 2.0   # maximum penalty to assess in the likelihood field model
 
@@ -101,12 +162,17 @@ class ParticleFilter:
 
         # pose_listener responds to selection of a new approximate robot location (for instance using rviz)
         rospy.Subscriber("initialpose", PoseWithCovarianceStamped, self.update_initial_pose)
+        # laser_subscriber listens for data from the lidar
+        rospy.Subscriber(self.scan_topic, LaserScan, self.scan_received)
 
         # publish the current particle cloud.  This enables viewing particles in rviz.
         self.particle_pub = rospy.Publisher("particlecloud", PoseArray, queue_size=10)
-
-        # laser_subscriber listens for data from the lidar
-        rospy.Subscriber(self.scan_topic, LaserScan, self.scan_received)
+        # publish our hypotheses points
+        self.hypothesis_pub = rospy.Publisher("hypotheses", MarkerArray, queue_size=10)
+        # Publish the lidar scan that pf.py sees
+        self.lidar_pub = rospy.Publisher("lidar_visualization", MarkerArray, queue_size=10)
+        # Publish the lidar scan projected from the first hypothesis
+        self.projected_lidar_pub = rospy.Publisher("projected_lidar_visualization", MarkerArray, queue_size=10)
 
         # enable listening for and broadcasting coordinate transforms
         self.tf_listener = TransformListener()
@@ -185,6 +251,59 @@ class ParticleFilter:
     def update_particles_with_laser(self, msg):
         """ Updates the particle weights in response to the scan contained in the msg """
         # TODO: implement this
+
+        # Note: This only updates the weights. This does not move the particles themselves
+
+        # Breakdown the recieved scan into x,y positions relative to the robot frame
+        # print(msg.ranges)
+
+        # Filter out invalid ranges
+        angle_range_list = []
+        for angle, range_ in enumerate(msg.ranges[0:360]):
+            if range_ != 0.0: # valid range
+                angle_range_list.append((angle,range_))
+
+        # Transform ranges into numpy array of xs and ys
+        relative_to_robot = np.zeros((len(angle_range_list), 2))
+        for index, (angle, range_) in enumerate(angle_range_list):
+            relative_to_robot[index, 0] = range_ * np.cos(angle*np.pi/180.0) # xs
+            relative_to_robot[index, 1] = range_ * np.sin(angle*np.pi/180.0)# ys
+
+        # Build up an array of lidar markers for visualization
+        lidar_markers = []
+        for index, xy_point in enumerate(relative_to_robot):
+            lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index, "base_link", "lidar_visualization"))
+
+        # Publish lidar points for visualization
+        self.lidar_pub.publish(MarkerArray(markers=lidar_markers))
+
+        # print(relative_to_robot)
+
+        # For every particle (hypothesis) we have
+        # for particle in particle_cloud:
+        particle = self.particle_cloud[0]
+        # Combine the xy positions of the scan with the xy w of the hypothesis
+        # Rotation matrix could be helpful here (https://en.wikipedia.org/wiki/Rotation_matrix)
+
+        # Build our rotation matrix
+        R = np.array([[np.cos(particle.theta), -np.sin(particle.theta)],[np.sin(particle.theta), np.cos(particle.theta)]])
+
+        # Rotate the points according to particle orientation
+        relative_to_particle = relative_to_robot.dot(R)
+
+        # Translate points to be relative to map origin
+        relative_to_map = deepcopy(relative_to_particle)
+        relative_to_map[:,0:1] = relative_to_map[:,0:1] + particle.x * np.ones((relative_to_map.shape[0],1))
+        relative_to_map[:,1:2] = relative_to_map[:,1:2] + particle.y * np.ones((relative_to_map.shape[0],1))
+
+        # Visualize the projected points
+        projected_lidar_markers = []
+        for index, xy_point in enumerate(relative_to_map):
+            projected_lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index, "map", "projected_lidar_visualization"))
+
+        self.projected_lidar_pub.publish(MarkerArray(markers=projected_lidar_markers))
+
+        # Take the absolute difference between the scan and where points should be for each projected point
         pass
 
     @staticmethod
@@ -209,45 +328,66 @@ class ParticleFilter:
         xy_theta = self.transform_helper.convert_pose_to_xy_and_theta(msg.pose.pose)
         self.initialize_particle_cloud(msg.header.stamp, xy_theta)
 
-    def initialize_particle_cloud(self, timestamp, xy_theta=None, estimate_location= False):
+    def initialize_particle_cloud(self, timestamp, xy_theta=None):
         """ Initialize the particle cloud.
             Arguments
             xy_theta: a triple consisting of the mean x, y, and theta (yaw) to initialize the
                       particle cloud around.  If this input is omitted, the odometry will be used """
-        if xy_theta is None:
-            xy_theta = self.transform_helper.convert_pose_to_xy_and_theta(self.odom_pose.pose)
 
-        self.particle_cloud = []
+        # TODO: Move the xy_theta stuff to where the robot initializes around a given set of points
+        # if xy_theta is None:
+        #     xy_theta = self.transform_helper.convert_pose_to_xy_and_theta(self.odom_pose.pose)
+
         # TODO create particles
 
-        #check whether the algorithm should assume inital conditions or not
-        if estimate_location == False:
+        # Check how the algorithm should initialize its particles
+
+        # Distribute particles uniformly with parameters defining the number of particles and bounding box
+        if self.particle_init_options == ParticleInitOptions.UNIFORM_DISTRIBUTION:
             #create an index to track the x cordinate of the particles being created
-            
+
             #calculate the number of particles to place widthwize vs hightwize along the map based on the number of particles and the dimensions of the map
             num_particles_x = math.sqrt(self.n_particles)
-            num_particles_y = num_particles_x 
+            num_particles_y = num_particles_x
 
 
 
             index_x = -20
             #iterate over the map to place points in a uniform grid
             while index_x < 15:
-                
+
                 index_y = -20
                 while index_y < 15:
                     #create a particle at the location with a random orientation
                     new_particle = Particle(index_x,index_y,uniform(0,2 * math.pi))
                     #add the particle to the particle array
                     self.particle_cloud.append(new_particle)
-                    
+
                     #increment the index to place the next particle
                     index_y += 35/(num_particles_y)
                 #increment index to place next column of particles
                 index_x += 35/num_particles_x
 
-        #self.normalize_particles()
-        #self.update_robot_pose(timestamp)
+        # Distribute particles uniformly, but hard-coded (mainly for quick tests)
+        elif self.particle_init_options == ParticleInitOptions.UNIFORM_DISTRIBUTION_HARDCODED:
+            # Make a list of hypotheses that can update based on values
+            xs = np.linspace(-5,5,21)
+            ys = np.linspace(-5,5,21)
+            for y in ys:
+                for x in xs:
+                    for i in range(5):
+                        new_particle = Particle(x,y,np.random.uniform(0,2 * math.pi))
+                        self.particle_cloud.append(new_particle)
+
+        elif self.particle_init_options == ParticleInitOptions.SINGLE_PARTICLE:
+            new_particle = Particle(1.0,1.0,0.0)
+            self.particle_cloud.append(new_particle)
+
+        # TODO: Optional, make a ParticleInitOptions for setting initial conditions
+
+        # TODO: Re-enable these lines of code
+        self.normalize_particles()
+        # self.update_robot_pose(timestamp)
 
     def normalize_particles(self):
         """ Make sure the particle weights define a valid distribution (i.e. sum to 1.0) """
@@ -334,14 +474,25 @@ if __name__ == '__main__':
     n = ParticleFilter()
     r = rospy.Rate(5)
 
-    # OF = OccupancyField()
-    # TODO: play with how occupancy field works
+
 
     while not(rospy.is_shutdown()):
-        # in the main loop all we do is continuously broadcast the latest map to odom transform
-        n.transform_helper.send_last_map_to_odom_transform()
+        try:
+            rospy.loginfo("heartbeat")
+            # in the main loop all we do is continuously broadcast the latest map to odom transform
+            n.transform_helper.send_last_map_to_odom_transform()
 
-        # OF.get_closest_obstacle_distance(100,100)
-        # TODO: Play with how occupancy field works
-        
-        r.sleep()
+            # trying to publish some points
+            # self.hypothesis_pub.publish(PoseArray(header=Header(stamp=rospy.Time.now(),
+            #                             frame_id=self.map_frame),
+            #                     poses=particles_conv))
+            particle_markers = [particle.as_marker(count) for count, particle in enumerate(n.particle_cloud)]
+            n.hypothesis_pub.publish(MarkerArray(markers=particle_markers))
+
+            # temp = OF.get_closest_obstacle_distance(100,100)
+            # help(temp)
+            # TODO: Play with how occupancy field works
+
+            r.sleep()
+        except rospy.exceptions.ROSTimeMovedBackwardsException:
+            pass
