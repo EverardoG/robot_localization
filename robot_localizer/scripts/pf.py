@@ -30,6 +30,32 @@ from occupancy_field import OccupancyField
 from helper_functions import TFHelper
 from enum import Enum
 
+def build_lidar_marker(x,y,marker_id):
+    """ A helper function for visualizing lidar data """
+    marker = Marker()
+    marker.header.frame_id = "base_link";
+    marker.header.stamp = rospy.Time.now();
+    marker.ns = "lidar_visualization";
+    marker.id = marker_id
+    marker.type = Marker.SPHERE;
+    marker.action = Marker.ADD;
+    marker.pose.position.x = x
+    marker.pose.position.y = y
+    marker.pose.position.z = 0.5;
+    marker.pose.orientation.x = 0.0;
+    marker.pose.orientation.y = 0;
+    marker.pose.orientation.z = 0;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = 0.1
+    marker.scale.y = 0.1
+    marker.scale.z = 0.1
+    marker.color.a = 0.9 # Don't forget to set the alpha!
+    marker.color.r = 0.0
+    marker.color.g = 0.0
+    marker.color.b = 1.0
+
+    return marker
+
 class ParticleInitOptions(Enum):
     UNIFORM_DISTRIBUTION = 0
     UNIFORM_DISTRIBUTION_HARDCODED = 1
@@ -136,13 +162,15 @@ class ParticleFilter:
 
         # pose_listener responds to selection of a new approximate robot location (for instance using rviz)
         rospy.Subscriber("initialpose", PoseWithCovarianceStamped, self.update_initial_pose)
-        # publish the current particle cloud.  This enables viewing particles in rviz.
-        self.particle_pub = rospy.Publisher("particlecloud", PoseArray, queue_size=10)
         # laser_subscriber listens for data from the lidar
         rospy.Subscriber(self.scan_topic, LaserScan, self.scan_received)
 
-        # publish our hypetheses points
+        # publish the current particle cloud.  This enables viewing particles in rviz.
+        self.particle_pub = rospy.Publisher("particlecloud", PoseArray, queue_size=10)
+        # publish our hypotheses points
         self.hypothesis_pub = rospy.Publisher("hypotheses", MarkerArray, queue_size=10)
+        # Publish the lidar scan that pf.py sees
+        self.lidar_pub = rospy.Publisher("lidar_visualization", MarkerArray, queue_size=10)
 
         # enable listening for and broadcasting coordinate transforms
         self.tf_listener = TransformListener()
@@ -225,6 +253,28 @@ class ParticleFilter:
         # Note: This only updates the weights. This does not move the particles themselves
 
         # Breakdown the recieved scan into x,y positions relative to the robot frame
+        # print(msg.ranges)
+
+        # Filter out invalid ranges
+        angle_range_list = []
+        for angle, range_ in enumerate(msg.ranges[0:360]):
+            if range_ != 0.0: # valid range
+                angle_range_list.append((angle,range_))
+
+        # Transform ranges into numpy array of xs and ys
+        relative_to_robot = np.zeros((len(angle_range_list), 2))
+        for index, (angle, range_) in enumerate(angle_range_list):
+            relative_to_robot[index, 0] = range_ * np.cos(angle*np.pi/180.0) # xs
+            relative_to_robot[index, 1] = range_ * np.sin(angle*np.pi/180.0)# ys
+
+        # Build up an array of lidar markers for visualization
+        lidar_markers = []
+        for index, xy_point in enumerate(relative_to_robot):
+            lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index))
+
+        # Publish lidar points for visualization
+        self.lidar_pub.publish(MarkerArray(markers=lidar_markers))
+
         # For every particle (hypothesis) we have
             # Combine the xy positions of the scan with the xy w of the hypothesis
             # Take the absolute difference between the scan and where points should be for each projected point
