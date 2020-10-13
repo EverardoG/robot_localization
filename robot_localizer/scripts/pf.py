@@ -71,12 +71,10 @@ class Particle(object):
 
     def __init__(self,x=0.0,y=0.0,theta=0.0,w=1.0):
         """ Construct a new Particle
-            x: the x-coordinate of the hypothesis relative to the map frame
-            y: the y-coordinate of the hypothesis relative ot the map frame
-            theta: the yaw of the hypothesis relative to the map frame
+            x: the x-coordinate of the hypothesis relative to the map frame (meters)
+            y: the y-coordinate of the hypothesis relative ot the map frame (meters)
+            theta: the yaw of the hypothesis relative to the map frame (radians)
             w: the particle weight (the class does not ensure that particle weights are normalized """
-        # TODO: Determine what the x,y coordinates actually are in terms of what the map frame _is_
-        # TODO: Determine how theta works (0 to 360 vs -180 to 180, and where 0 is, which way is +, which is -)
         self.w = w
         self.theta = theta
         self.x = x
@@ -276,7 +274,19 @@ class ParticleFilter:
         self.lidar_pub.publish(MarkerArray(markers=lidar_markers))
 
         # For every particle (hypothesis) we have
+        for particle in particle_cloud:
             # Combine the xy positions of the scan with the xy w of the hypothesis
+            # Rotation matrix could be helpful here (https://en.wikipedia.org/wiki/Rotation_matrix)
+
+            # Build our rotation matrix
+            R = np.array([np.cos(particle.theta), -np.sin(particle.theta)],[np.sin(particle.theta), np.cos(particle.theta)])
+
+            # Rotate the points according to particle orientation
+            relative_to_particle = R.T*relative_to_robot
+
+            # Transform points so that they're relative to the particle
+
+
             # Take the absolute difference between the scan and where points should be for each projected point
         pass
 
