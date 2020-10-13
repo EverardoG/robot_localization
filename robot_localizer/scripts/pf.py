@@ -222,16 +222,16 @@ class ParticleFilter:
             #create an index to track the x cordinate of the particles being created
             
             #calculate the number of particles to place widthwize vs hightwize along the map based on the number of particles and the dimensions of the map
-            num_particles_x = math.sqrt(self.number_of_particles * map_max_y / map_max_x)
-            num_particles_y = num_particles_x * map_max_x / map_max_y 
+            num_particles_x = math.sqrt(self.number_of_particles)
+            num_particles_y = num_particles_x 
 
 
 
-            xindex = 0
+            xindex = -15
             #iterate over the map to place points in a uniform grid
             while index_x < map_max_x:
                 
-                index_y = 0
+                index_y = -20
                 while index_y < map_max_y:
                     #create a particle at the location with a random orientation
                     new_particle = Particle(index_x,index_y,random.uniform(0,2 * math.pi))
@@ -243,8 +243,8 @@ class ParticleFilter:
                 #increment index to place next column of particles
                 index_x += map_max_x/num_particles_x
 
-        self.normalize_particles()
-        self.update_robot_pose(timestamp)
+        #self.normalize_particles()
+        #self.update_robot_pose(timestamp)
 
     def normalize_particles(self):
         """ Make sure the particle weights define a valid distribution (i.e. sum to 1.0) """
