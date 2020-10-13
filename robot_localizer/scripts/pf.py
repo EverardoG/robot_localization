@@ -16,8 +16,11 @@ from tf import TransformBroadcaster
 from tf.transformations import euler_from_quaternion, rotation_matrix, quaternion_from_matrix
 from random import gauss
 
+from random import uniform
+
 import math
 import time
+
 
 import numpy as np
 from numpy.random import random_sample
@@ -222,26 +225,26 @@ class ParticleFilter:
             #create an index to track the x cordinate of the particles being created
             
             #calculate the number of particles to place widthwize vs hightwize along the map based on the number of particles and the dimensions of the map
-            num_particles_x = math.sqrt(self.number_of_particles)
+            num_particles_x = math.sqrt(self.n_particles)
             num_particles_y = num_particles_x 
 
 
 
-            xindex = -15
+            index_x = -20
             #iterate over the map to place points in a uniform grid
-            while index_x < map_max_x:
+            while index_x < 15:
                 
                 index_y = -20
-                while index_y < map_max_y:
+                while index_y < 15:
                     #create a particle at the location with a random orientation
-                    new_particle = Particle(index_x,index_y,random.uniform(0,2 * math.pi))
+                    new_particle = Particle(index_x,index_y,uniform(0,2 * math.pi))
                     #add the particle to the particle array
                     self.particle_cloud.append(new_particle)
                     
                     #increment the index to place the next particle
-                    index_y += map_max_y/(num_particles_y)
+                    index_y += 35/(num_particles_y)
                 #increment index to place next column of particles
-                index_x += map_max_x/num_particles_x
+                index_x += 35/num_particles_x
 
         #self.normalize_particles()
         #self.update_robot_pose(timestamp)
@@ -250,7 +253,7 @@ class ParticleFilter:
         """ Make sure the particle weights define a valid distribution (i.e. sum to 1.0) """
         #set variable inital values
         index = 0
-        weightSUm = 0
+        weightSum = 0
 
         #calulate the total particle weight
         while index < len(self.particle_cloud):
@@ -259,7 +262,7 @@ class ParticleFilter:
         index = 0
 
         #normalize the weight for each particle by divifdng by the total weight
-        while Index < len(self.particle_cloud):
+        while index < len(self.particle_cloud):
             self.particle_cloud[index].w = self.particle_cloud[index].w / weightSum
             index += 1
 
