@@ -258,8 +258,41 @@ class ParticleFilter:
         """
         # make sure the distribution is normalized
         self.normalize_particles()
-        # TODO: fill out the rest of the implementation
+        
+        #cull particles
+        #set looping variable values and initalize array to store significant points
+        pointIndex = 0
+        resampelingNodes = []
+        nodeIndex = 0
+        #iterate through all points
+        while pointIndex < len(self.particle_cloud):
+            #If the particle is significantly weighted
+            if self.particle_cloud[pointIndex].w > 0.01:
+                #add the particle to the list of significant particles (nodes)
+                resamplingNodes[nodeIndex] = self.particle_cloud[pointIndex]
+                nodeIndex += 1
+            pointIndex += 1
+        
+        #repopulate field
+        #loop through all the significant weighted particles (or nodes in the probability field)
+        nodeIndex = 0
+        particleIndex = 0
+        while nodeIndex < len(resamplingNodes):
 
+            #place points around nodes
+            placePointIndex = 0
+            #loop through the number of points that need to be placed given the weight of the particle
+            while placePointIndex < self.n_points * resamplingNodes[nodeIndex].w:
+                #place point in circular area around node
+                radiusRepopCircle = resamplingNodes[nodeIndex].w
+                #create a point in the circular area
+                self.particle_cloud[particleIndex] = Particle(uniform((resamplingNodes[nodeIndex].x - radiusRepopCircle),(resamplingNodes[nodeIndex].x + radiusRepopCircle)),uniform((resamplingNodes[nodeIndex].y - radiusRepopCircle),(resamplingNodes[nodeIndex].y + radiusRepopCircle)),uniform(0,2 * math.pi))
+                #update iteration variables
+                particleIndex += 1
+                placePointIndex += 1
+            nodeIndex += 1
+        self.normalize_particles()
+    
     def update_particles_with_laser(self, msg):
         """ Updates the particle weights in response to the scan contained in the msg """
         # Note: This only updates the weights. This does not move the particles themselves
