@@ -37,7 +37,7 @@ def build_lidar_marker(x, y, marker_id, frame_id, namespace, color_rgb=(0.0,0.0,
     marker.header.stamp = rospy.Time.now();
     marker.ns = namespace # "lidar_visualization";
     marker.id = marker_id
-    marker.type = Marker.SPHERE;
+    marker.type = Marker.CUBE;
     marker.action = Marker.ADD;
     marker.pose.position.x = x
     marker.pose.position.y = y
@@ -53,6 +53,15 @@ def build_lidar_marker(x, y, marker_id, frame_id, namespace, color_rgb=(0.0,0.0,
     marker.color.r = color_rgb[0]
     marker.color.g = color_rgb[1]
     marker.color.b = color_rgb[2]
+
+    return marker
+
+def build_deletion_marker(marker_id, namespace):
+    """ A helper function for deleting old visualization data """
+    marker = Marker()
+    marker.id = marker_id
+    marker.ns = namespace
+    marker.action = Marker.DELETE
 
     return marker
 
@@ -163,16 +172,16 @@ class ParticleFilter:
         # pose_listener responds to selection of a new approximate robot location (for instance using rviz)
         rospy.Subscriber("initialpose", PoseWithCovarianceStamped, self.update_initial_pose)
         # laser_subscriber listens for data from the lidar
-        rospy.Subscriber(self.scan_topic, LaserScan, self.scan_received)
+        rospy.Subscriber(self.scan_topic, LaserScan, self.scan_received, queue_size=1)
 
         # publish the current particle cloud.  This enables viewing particles in rviz.
         self.particle_pub = rospy.Publisher("particlecloud", PoseArray, queue_size=10)
         # publish our hypotheses points
         self.hypothesis_pub = rospy.Publisher("hypotheses", MarkerArray, queue_size=10)
         # Publish the lidar scan that pf.py sees
-        self.lidar_pub = rospy.Publisher("lidar_visualization", MarkerArray, queue_size=10)
+        self.lidar_pub = rospy.Publisher("lidar_visualization", MarkerArray, queue_size=1)
         # Publish the lidar scan projected from the first hypothesis
-        self.projected_lidar_pub = rospy.Publisher("projected_lidar_visualization", MarkerArray, queue_size=10)
+        self.projected_lidar_pub = rospy.Publisher("projected_lidar_visualization", MarkerArray, queue_size=1)
 
         # enable listening for and broadcasting coordinate transforms
         self.tf_listener = TransformListener()
@@ -257,6 +266,10 @@ class ParticleFilter:
         # Breakdown the recieved scan into x,y positions relative to the robot frame
         # print(msg.ranges)
 
+        # TODO: try to reduce amount of data
+        # maybe try 8 points or some other subsample
+        # try just taking the nearest one
+
         # Filter out invalid ranges
         angle_range_list = []
         for angle, range_ in enumerate(msg.ranges[0:360]):
@@ -272,7 +285,19 @@ class ParticleFilter:
         # Build up an array of lidar markers for visualization
         lidar_markers = []
         for index, xy_point in enumerate(relative_to_robot):
-            lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index, "base_link", "lidar_visualization"))
+            lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index, "base_link", "lidar_visualization", (0.0,1.0,0.0)))
+
+        # Make sure to delete any old markers
+        num_deletion_markers = 360 - len(lidar_markers)
+        for _ in range(num_deletion_markers):
+            marker_id = len(lidar_markers)
+            lidar_markers.append(build_deletion_marker(marker_id, "lidar_visualization"))
+
+        # print("\n")
+        # print("Length of msg ranges: ", len(msg.ranges))
+        # print("Length of angle_range_list: ", len(angle_range_list))
+        # print("shape of relative to robot array: ", relative_to_robot.shape)
+        # print("Length of lidar_markers: ", len(lidar_markers))
 
         # Publish lidar points for visualization
         self.lidar_pub.publish(MarkerArray(markers=lidar_markers))
@@ -280,28 +305,40 @@ class ParticleFilter:
         # print(relative_to_robot)
 
         # For every particle (hypothesis) we have
-        # for particle in particle_cloud:
-        particle = self.particle_cloud[0]
-        # Combine the xy positions of the scan with the xy w of the hypothesis
-        # Rotation matrix could be helpful here (https://en.wikipedia.org/wiki/Rotation_matrix)
+        for particle in self.particle_cloud:
+            # particle = self.particle_cloud[0]
+            # Combine the xy positions of the scan with the xy w of the hypothesis
+            # Rotation matrix could be helpful here (https://en.wikipedia.org/wiki/Rotation_matrix)
 
-        # Build our rotation matrix
-        R = np.array([[np.cos(particle.theta), -np.sin(particle.theta)],[np.sin(particle.theta), np.cos(particle.theta)]])
+            # Build our rotation matrix
+            R = np.array([[np.cos(particle.theta), -np.sin(particle.theta)],[np.sin(particle.theta), np.cos(particle.theta)]])
 
-        # Rotate the points according to particle orientation
-        relative_to_particle = relative_to_robot.dot(R)
+            # Rotate the points according to particle orientation
+            relative_to_particle = (R.dot(relative_to_robot.T)).T
+            # relative_to_particle = relative_to_robot.dot(R)
 
-        # Translate points to be relative to map origin
-        relative_to_map = deepcopy(relative_to_particle)
-        relative_to_map[:,0:1] = relative_to_map[:,0:1] + particle.x * np.ones((relative_to_map.shape[0],1))
-        relative_to_map[:,1:2] = relative_to_map[:,1:2] + particle.y * np.ones((relative_to_map.shape[0],1))
+            # Translate points to be relative to map origin
+            # relative_to_map = deepcopy(relative_to_particle)
 
-        # Visualize the projected points
-        projected_lidar_markers = []
-        for index, xy_point in enumerate(relative_to_map):
-            projected_lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index, "map", "projected_lidar_visualization"))
+            # First just testing translation
+            relative_to_map = deepcopy(relative_to_particle)
+            relative_to_map[:,0:1] = relative_to_map[:,0:1] + particle.x * np.ones((relative_to_map.shape[0],1))
+            relative_to_map[:,1:2] = relative_to_map[:,1:2] + particle.y * np.ones((relative_to_map.shape[0],1))
 
-        self.projected_lidar_pub.publish(MarkerArray(markers=projected_lidar_markers))
+            # Visualize one of the particles
+            if particle is self.particle_cloud[0]:
+                # Visualize the projected points
+                projected_lidar_markers = []
+                for index, xy_point in enumerate(relative_to_map):
+                    projected_lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index, "map", "projected_lidar_visualization"))
+
+                # Make sure to delete any old markers
+                num_deletion_markers = 360 - len(projected_lidar_markers)
+                for _ in range(num_deletion_markers):
+                    marker_id = len(projected_lidar_markers)
+                    projected_lidar_markers.append(build_deletion_marker(marker_id, "projected_lidar_visualization"))
+
+                self.projected_lidar_pub.publish(MarkerArray(markers=projected_lidar_markers))
 
         # Take the absolute difference between the scan and where points should be for each projected point
         pass
@@ -350,8 +387,6 @@ class ParticleFilter:
             num_particles_x = math.sqrt(self.n_particles)
             num_particles_y = num_particles_x
 
-
-
             index_x = -20
             #iterate over the map to place points in a uniform grid
             while index_x < 15:
@@ -380,7 +415,7 @@ class ParticleFilter:
                         self.particle_cloud.append(new_particle)
 
         elif self.particle_init_options == ParticleInitOptions.SINGLE_PARTICLE:
-            new_particle = Particle(1.0,1.0,0.0)
+            new_particle = Particle(1.0,1.0, math.pi/2.0)
             self.particle_cloud.append(new_particle)
 
         # TODO: Optional, make a ParticleInitOptions for setting initial conditions
