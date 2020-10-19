@@ -243,7 +243,15 @@ class ParticleFilter:
             self.current_odom_xy_theta = new_odom_xy_theta
             return
 
-        # TODO: modify particles using delta
+        #iterate through the particles in the particle cloud
+        particleIndex = 0
+        while particleIndex < len(self.particle_cloud):
+            
+            #move each particle according to the delta
+            self.particle_cloud[particleIndex][0] = delta[0]
+            self.particle_cloud[particleIndex][1] += delta[1]
+            self.particle_cloud[particleIndex][2] += delta[2]
+            
 
     def map_calc_range(self,x,y,theta):
         """ Difficulty Level 3: implement a ray tracing likelihood model... Let me know if you are interested """
