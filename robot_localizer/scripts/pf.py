@@ -30,11 +30,11 @@ from occupancy_field import OccupancyField
 from helper_functions import TFHelper
 from enum import Enum
 
-def build_lidar_marker(x, y, marker_id, frame_id, namespace, color_rgb=(0.0,0.0,1.0)):
+def build_lidar_marker(t, x, y, marker_id, frame_id, namespace, color_rgb=(0.0,0.0,1.0)):
     """ A helper function for visualizing lidar data """
     marker = Marker()
     marker.header.frame_id = frame_id # "base_link";
-    marker.header.stamp = rospy.Time.now();
+    marker.header.stamp = t
     marker.ns = namespace # "lidar_visualization";
     marker.id = marker_id
     marker.type = Marker.CUBE;
@@ -56,12 +56,13 @@ def build_lidar_marker(x, y, marker_id, frame_id, namespace, color_rgb=(0.0,0.0,
 
     return marker
 
-def build_deletion_marker(marker_id, namespace):
+def build_deletion_marker(t, marker_id, namespace):
     """ A helper function for deleting old visualization data """
     marker = Marker()
     marker.id = marker_id
     marker.ns = namespace
     marker.action = Marker.DELETE
+    marker.header.stamp = t
 
     return marker
 
@@ -114,12 +115,14 @@ class Particle(object):
         marker.pose.orientation.z = orientation_tuple[2];
         marker.pose.orientation.w = orientation_tuple[3];
         marker.scale.x = 0.1 # How long the arrow is
-        marker.scale.y = self.w/50.0 # arrow width - you can have a wide arrow that isn't tall. Arrow is not necessarily a circle
-        marker.scale.z = self.w/50.0
+        marker.scale.y = 1/50.0#self.w/50.0 # arrow width - you can have a wide arrow that isn't tall. Arrow is not necessarily a circle
+        marker.scale.z = 1/50.0#self.w/50.0
         marker.color.a = 0.9 # Don't forget to set the alpha!
         marker.color.r = 0.0
-        marker.color.g = 0.0
-        marker.color.b = 1.0
+        green = self.w*750.0
+        if green > 1.0: green = 1.0
+        marker.color.g = green
+        marker.color.b = 0.0
 
         return marker
 
@@ -157,7 +160,7 @@ class ParticleFilter:
         self.scan_topic = "scan"        # the topic where we will get laser scans from
 
         self.n_particles = 300          # the number of particles to use
-        self.particle_init_options = ParticleInitOptions.SINGLE_PARTICLE
+        self.particle_init_options = ParticleInitOptions.UNIFORM_DISTRIBUTION
 
         self.d_thresh = 0.2             # the amount of linear movement before performing an update
         self.a_thresh = math.pi/6       # the amount of angular movement before performing an update
@@ -259,12 +262,7 @@ class ParticleFilter:
 
     def update_particles_with_laser(self, msg):
         """ Updates the particle weights in response to the scan contained in the msg """
-        # TODO: implement this
-
         # Note: This only updates the weights. This does not move the particles themselves
-
-        # Breakdown the recieved scan into x,y positions relative to the robot frame
-        # print(msg.ranges)
 
         # TODO: try to reduce amount of data
         # maybe try 8 points or some other subsample
@@ -285,28 +283,19 @@ class ParticleFilter:
         # Build up an array of lidar markers for visualization
         lidar_markers = []
         for index, xy_point in enumerate(relative_to_robot):
-            lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index, "base_link", "lidar_visualization", (0.0,1.0,0.0)))
+            lidar_markers.append(build_lidar_marker(msg.header.stamp, xy_point[0], xy_point[1], index, "base_link", "lidar_visualization", (1.0,0.0,0.0)))
 
         # Make sure to delete any old markers
         num_deletion_markers = 360 - len(lidar_markers)
         for _ in range(num_deletion_markers):
             marker_id = len(lidar_markers)
-            lidar_markers.append(build_deletion_marker(marker_id, "lidar_visualization"))
-
-        # print("\n")
-        # print("Length of msg ranges: ", len(msg.ranges))
-        # print("Length of angle_range_list: ", len(angle_range_list))
-        # print("shape of relative to robot array: ", relative_to_robot.shape)
-        # print("Length of lidar_markers: ", len(lidar_markers))
+            lidar_markers.append(build_deletion_marker(msg.header.stamp, marker_id, "lidar_visualization"))
 
         # Publish lidar points for visualization
         self.lidar_pub.publish(MarkerArray(markers=lidar_markers))
 
-        # print(relative_to_robot)
-
         # For every particle (hypothesis) we have
         for particle in self.particle_cloud:
-            # particle = self.particle_cloud[0]
             # Combine the xy positions of the scan with the xy w of the hypothesis
             # Rotation matrix could be helpful here (https://en.wikipedia.org/wiki/Rotation_matrix)
 
@@ -318,30 +307,51 @@ class ParticleFilter:
             # relative_to_particle = relative_to_robot.dot(R)
 
             # Translate points to be relative to map origin
-            # relative_to_map = deepcopy(relative_to_particle)
-
-            # First just testing translation
             relative_to_map = deepcopy(relative_to_particle)
             relative_to_map[:,0:1] = relative_to_map[:,0:1] + particle.x * np.ones((relative_to_map.shape[0],1))
             relative_to_map[:,1:2] = relative_to_map[:,1:2] + particle.y * np.ones((relative_to_map.shape[0],1))
 
-            # Visualize one of the particles
-            if particle is self.particle_cloud[0]:
-                # Visualize the projected points
-                projected_lidar_markers = []
-                for index, xy_point in enumerate(relative_to_map):
-                    projected_lidar_markers.append(build_lidar_marker(xy_point[0], xy_point[1], index, "map", "projected_lidar_visualization"))
+            # Get the distances of each projected point to nearest obstacle
+            distance_list = []
+            for xy_projected_point in relative_to_map:
+                distance = self.occupancy_field.get_closest_obstacle_distance(xy_projected_point[0], xy_projected_point[1])
+                if not np.isfinite(distance):
+                    # Note: ac109 map has approximately a 10x10 bounding box
+                    # Hardcode 1m as the default distance in case the projected point is off the map
+                    distance = 1.0
+                distance_list.append(distance)
 
-                # Make sure to delete any old markers
-                num_deletion_markers = 360 - len(projected_lidar_markers)
-                for _ in range(num_deletion_markers):
-                    marker_id = len(projected_lidar_markers)
-                    projected_lidar_markers.append(build_deletion_marker(marker_id, "projected_lidar_visualization"))
+            # Calculate a weight for for this particle
+            # Note: The further away a projected point is from an obstacle point,
+            #       the lower its weight should be
+            weight = 1.0 / sum(distance_list)
+            particle.w = weight
 
-                self.projected_lidar_pub.publish(MarkerArray(markers=projected_lidar_markers))
+        # Normalize the weights
+        self.normalize_particles()
 
-        # Take the absolute difference between the scan and where points should be for each projected point
-        pass
+        # Grab the first particle
+        particle = self.particle_cloud[0]
+
+        # Visualize the projected points around that particle
+        projected_lidar_markers = []
+        for index, xy_point in enumerate(relative_to_map):
+            projected_lidar_markers.append(build_lidar_marker(msg.header.stamp, xy_point[0], xy_point[1], index, "map", "projected_lidar_visualization"))
+
+        # Make sure to delete any old markers
+        num_deletion_markers = 360 - len(projected_lidar_markers)
+        for _ in range(num_deletion_markers):
+            marker_id = len(projected_lidar_markers)
+            projected_lidar_markers.append(build_deletion_marker(msg.header.stamp, marker_id, "projected_lidar_visualization"))
+
+        # Publish the projection visualization to rviz
+        self.projected_lidar_pub.publish(MarkerArray(markers=projected_lidar_markers))
+
+        # Build up a list of all the particles as Rviz Markers
+        particle_markers = [particle.as_marker(count) for count, particle in enumerate(n.particle_cloud)]
+
+        # Publish the visualization of all the particles in Rviz
+        n.hypothesis_pub.publish(MarkerArray(markers=particle_markers))
 
     @staticmethod
     def draw_random_sample(choices, probabilities, n):
@@ -406,8 +416,8 @@ class ParticleFilter:
         # Distribute particles uniformly, but hard-coded (mainly for quick tests)
         elif self.particle_init_options == ParticleInitOptions.UNIFORM_DISTRIBUTION_HARDCODED:
             # Make a list of hypotheses that can update based on values
-            xs = np.linspace(-5,5,21)
-            ys = np.linspace(-5,5,21)
+            xs = np.linspace(-3,4,21)
+            ys = np.linspace(-4,3,21)
             for y in ys:
                 for x in xs:
                     for i in range(5):
@@ -430,7 +440,7 @@ class ParticleFilter:
         index = 0
         weightSum = 0
 
-        #calulate the total particle weight
+        # calulate the total particle weight
         while index < len(self.particle_cloud):
             weightSum += self.particle_cloud[index].w
             index += 1
@@ -509,25 +519,11 @@ if __name__ == '__main__':
     n = ParticleFilter()
     r = rospy.Rate(5)
 
-
-
     while not(rospy.is_shutdown()):
         try:
             rospy.loginfo("heartbeat")
             # in the main loop all we do is continuously broadcast the latest map to odom transform
             n.transform_helper.send_last_map_to_odom_transform()
-
-            # trying to publish some points
-            # self.hypothesis_pub.publish(PoseArray(header=Header(stamp=rospy.Time.now(),
-            #                             frame_id=self.map_frame),
-            #                     poses=particles_conv))
-            particle_markers = [particle.as_marker(count) for count, particle in enumerate(n.particle_cloud)]
-            n.hypothesis_pub.publish(MarkerArray(markers=particle_markers))
-
-            # temp = OF.get_closest_obstacle_distance(100,100)
-            # help(temp)
-            # TODO: Play with how occupancy field works
-
             r.sleep()
         except rospy.exceptions.ROSTimeMovedBackwardsException:
             pass
