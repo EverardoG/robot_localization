@@ -225,9 +225,14 @@ class ParticleFilter:
                 (1): compute the mean pose
                 (2): compute the most likely pose (i.e. the mode of the distribution)
         """
-        # TODO: assign the latest pose into self.robot_pose as a geometry_msgs.Pose object
-        # just to get started we will fix the robot's pose to always be at the origin
-        self.robot_pose = Pose()
+        # assign the best particle's pose to self.robot_pose as a geometry_msgs.Pose object
+
+        best_particle = self.particle_cloud[0]
+        for particle in self.particle_cloud[1:]:
+            if particle.w > best_particle.w:
+                best_particle = particle
+
+        self.robot_pose = best_particle.as_pose()
 
         self.transform_helper.fix_map_to_odom_transform(self.robot_pose, timestamp)
 
@@ -332,6 +337,7 @@ class ParticleFilter:
         # Uniformly cluster the lowest weighted particles around the highest weighted particles (resamplingNodes)
         num_cluster = 0
         cluster_radius = 0.25
+        cluster_theta_range = math.pi/2.0
         for resamplingNode in resamplingNodes:
             start_cluster_index = numResamplingNodes + num_cluster * cluster_size
             end_cluster_index = start_cluster_index + cluster_size
@@ -340,8 +346,9 @@ class ParticleFilter:
             for particle_index in range(start_cluster_index, end_cluster_index):
                 self.particle_cloud[particle_index].x = uniform((resamplingNode.x - cluster_radius),(resamplingNode.x + cluster_radius))
                 self.particle_cloud[particle_index].y = uniform((resamplingNode.y - cluster_radius),(resamplingNode.y + cluster_radius))
-                self.particle_cloud[particle_index].theta = resamplingNode.theta
+                self.particle_cloud[particle_index].theta = uniform((resamplingNode.w - cluster_theta_range),(resamplingNode.w + cluster_theta_range))
                 self.particle_cloud[particle_index].w = resamplingNode.w
+                # self.particle_cloud[particle_index].w = uniform((resamplingNode.w - cluster_theta_range),(resamplingNode.w + cluster_theta_range))
             num_cluster += 1
 
         # TODO: Experiment with clustering points dependending on weight of the resamplingNode
