@@ -262,17 +262,19 @@ class ParticleFilter:
         #cull particles
         #set looping variable values and initalize array to store significant points
         pointIndex = 0
-        resampelingNodes = []
+        resamplingNodes = []
         nodeIndex = 0
         #iterate through all points
         while pointIndex < len(self.particle_cloud):
             #If the particle is significantly weighted
             if self.particle_cloud[pointIndex].w > 0.01:
                 #add the particle to the list of significant particles (nodes)
-                resamplingNodes[nodeIndex] = self.particle_cloud[pointIndex]
+                resamplingNodes.append(self.particle_cloud[pointIndex])
                 nodeIndex += 1
             pointIndex += 1
-        
+       
+        print(len(resamplingNodes))
+ 
         #repopulate field
         #loop through all the significant weighted particles (or nodes in the probability field)
         nodeIndex = 0
@@ -282,11 +284,11 @@ class ParticleFilter:
             #place points around nodes
             placePointIndex = 0
             #loop through the number of points that need to be placed given the weight of the particle
-            while placePointIndex < self.n_points * resamplingNodes[nodeIndex].w:
+            while placePointIndex < self.n_particles * resamplingNodes[nodeIndex].w:
                 #place point in circular area around node
-                radiusRepopCircle = resamplingNodes[nodeIndex].w
+                radiusRepopCircle = resamplingNodes[nodeIndex].w*10.0
                 #create a point in the circular area
-                self.particle_cloud[particleIndex] = Particle(uniform((resamplingNodes[nodeIndex].x - radiusRepopCircle),(resamplingNodes[nodeIndex].x + radiusRepopCircle)),uniform((resamplingNodes[nodeIndex].y - radiusRepopCircle),(resamplingNodes[nodeIndex].y + radiusRepopCircle)),uniform(0,2 * math.pi))
+                self.particle_cloud[particleIndex] = Particle(uniform((resamplingNodes[nodeIndex].x - radiusRepopCircle),(resamplingNodes[nodeIndex].x + radiusRepopCircle)),uniform((resamplingNodes[nodeIndex].y - radiusRepopCircle),(resamplingNodes[nodeIndex].y + radiusRepopCircle)),uniform(0,2.0 * math.pi))
                 #update iteration variables
                 particleIndex += 1
                 placePointIndex += 1
