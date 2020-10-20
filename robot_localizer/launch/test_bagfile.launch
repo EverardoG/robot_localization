@@ -8,7 +8,7 @@
   <arg name="use_gpu_laser" default="true"/>
 
   <node name="map_server" pkg="map_server" type="map_server" args="$(find robot_localizer)/maps/$(arg map_name).yaml"/>
-  <node name="bag_player" pkg="rosbag" type="play" args="$(find robot_localizer)/bags/$(arg map_name).bag --clock --pause" output="screen"/>
+  <node name="bag_player" pkg="rosbag" type="play" args="$(find robot_localizer)/bags/$(arg map_name).bag --clock --start=20" output="screen"/>
 
   <node name="rviz" pkg="rviz" type="rviz" args="-d $(find robot_localizer)/rviz/pf.rviz"/>
 
