@@ -159,7 +159,7 @@ class ParticleFilter:
         self.odom_frame = "odom"        # the name of the odometry coordinate frame
         self.scan_topic = "scan"        # the topic where we will get laser scans from
 
-        self.n_particles = 300          # the number of particles to use
+        self.n_particles = 600          # the number of particles to use
         self.particle_init_options = ParticleInitOptions.UNIFORM_DISTRIBUTION
 
         self.d_thresh = 0.2             # the amount of linear movement before performing an update
@@ -243,15 +243,19 @@ class ParticleFilter:
             self.current_odom_xy_theta = new_odom_xy_theta
             return
 
-        #iterate through the particles in the particle cloud
-        particleIndex = 0
-        while particleIndex < len(self.particle_cloud):
+
+        for particle in self.particle_cloud:
             
-            #move each particle according to the delta
-            self.particle_cloud[particleIndex][0] = delta[0]
-            self.particle_cloud[particleIndex][1] += delta[1]
-            self.particle_cloud[particleIndex][2] += delta[2]
+            partRotMtrx = np.array([[np.cos(particle.theta), -np.sin(particle.theta)],[np.sin(particle.theta), np.cos(particle.theta)]])
             
+            translationMtrx = np.array([[delta[0]],[delta[1]]])
+
+            partTranslationOp = partRotMtrx.dot(translationMtrx)
+
+            #update particle position to move with delta
+            particle.x += partTranslationOp[0,0]
+            particle.y += partTranslationOp[1,0]
+            particle.theta += delta[2]
 
     def map_calc_range(self,x,y,theta):
         """ Difficulty Level 3: implement a ray tracing likelihood model... Let me know if you are interested """
@@ -269,19 +273,19 @@ class ParticleFilter:
         
         #cull particles
         #set looping variable values and initalize array to store significant points
-        pointIndex = 0
-        resamplingNodes = []
-        nodeIndex = 0
-        #iterate through all points
-        while pointIndex < len(self.particle_cloud):
-            #If the particle is significantly weighted
-            if self.particle_cloud[pointIndex].w > 0.01:
-                #add the particle to the list of significant particles (nodes)
-                resamplingNodes.append(self.particle_cloud[pointIndex])
-                nodeIndex += 1
-            pointIndex += 1
-       
-        print(len(resamplingNodes))
+         
+        def returnFunc (part):
+            return part.w
+
+        self.particle_cloud.sort(key = returnFunc, reverse = True)
+
+        resamplingNodes = self.particle_cloud[0:100]
+
+        print("\n\n\n>>>>>>")
+        print(resamplingNodes[0].w)
+        print("\n")
+        print(resamplingNodes[-1].w)
+        print("<<<<<\n\n\n")
  
         #repopulate field
         #loop through all the significant weighted particles (or nodes in the probability field)
@@ -296,7 +300,7 @@ class ParticleFilter:
                 #place point in circular area around node
                 radiusRepopCircle = resamplingNodes[nodeIndex].w*10.0
                 #create a point in the circular area
-                self.particle_cloud[particleIndex] = Particle(uniform((resamplingNodes[nodeIndex].x - radiusRepopCircle),(resamplingNodes[nodeIndex].x + radiusRepopCircle)),uniform((resamplingNodes[nodeIndex].y - radiusRepopCircle),(resamplingNodes[nodeIndex].y + radiusRepopCircle)),uniform(0,2.0 * math.pi))
+                self.particle_cloud[particleIndex] = Particle(uniform((resamplingNodes[nodeIndex].x - radiusRepopCircle),(resamplingNodes[nodeIndex].x + radiusRepopCircle)),uniform((resamplingNodes[nodeIndex].y - radiusRepopCircle),(resamplingNodes[nodeIndex].y + radiusRepopCircle)),resamplingNodes[nodeIndex].theta)
                 #update iteration variables
                 particleIndex += 1
                 placePointIndex += 1
@@ -440,21 +444,21 @@ class ParticleFilter:
             num_particles_x = math.sqrt(self.n_particles)
             num_particles_y = num_particles_x
 
-            index_x = -20
+            index_x = -3
             #iterate over the map to place points in a uniform grid
-            while index_x < 15:
+            while index_x < 4:
 
-                index_y = -20
-                while index_y < 15:
+                index_y = -4
+                while index_y < 3:
                     #create a particle at the location with a random orientation
                     new_particle = Particle(index_x,index_y,uniform(0,2 * math.pi))
                     #add the particle to the particle array
                     self.particle_cloud.append(new_particle)
 
                     #increment the index to place the next particle
-                    index_y += 35/(num_particles_y)
+                    index_y += 7/(num_particles_y)
                 #increment index to place next column of particles
-                index_x += 35/num_particles_x
+                index_x += 7/num_particles_x
 
         # Distribute particles uniformly, but hard-coded (mainly for quick tests)
         elif self.particle_init_options == ParticleInitOptions.UNIFORM_DISTRIBUTION_HARDCODED:
