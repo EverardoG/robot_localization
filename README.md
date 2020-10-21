@@ -1,25 +1,14 @@
-# Robot Localization With Particle Clouds
-This is the base repo for the Olin Computational Robotics Robot Localization project. The goal of this project was to develop a particle filter which will allow a robot to locate itself in an environment if it has a pre existing map of the sensor readings in the environment.
-## How it works in broad strokes
-The robot generates a collection of possible locations in the map that it could be. The robot then compares the sensor readings at each of these locations to the map and its own sensors to determine how 'likely' the robot is to be at each of these locations. The robot weights the possible locations to represent this likelihood. Then the robot generates a new set of possible locations around the highest weighted points from the previous round. The robot then moves around its environment and computes where each possible location would be based on the movement the robot just executed. The robot then repeats the process by comparing its sensor values to those at each of the possible locations.
+<!-- ![A video Depiction of a point cloud algorithm collapsing to localize the robot. Possible robot locations represented by arrows start thinly distributed across a map then gradually move together and concentrate in certain areas as the robot moves around. Gradually ares get stronger until there is a cluster of Arrows following the robot](robot_localizer/gifs/ac109_1_test.gif)
 
-Over time the robot's possible positions estimates will converge on the most probable locations for the robot to be in the map with possible location estimates 'clustering around the most probable robot locations.
+Additionally, you can see in the gif that the particle filter can get tripped up with similar locations in that it got stuck between locating the robot at the ends of the hallways in the designated map. This is caused from the particle filter not having enough information to distinguish effectively between the two locations, where implementations which feature an initial pose do not tend to run into multiple similar conditions because they have the extra information of a starting point which will exclude possible 'similar solutions' found elsewhere in the map. -->
 
-## Our Approach
-
-## Interesting Extensions
-Particle filters of this type are usually used to refine a robot's position and compensate for drift They often require an initial pose estimate, an estimate which represents an approximation of the robots location and orientation in the map. We wanted the robot to be able to localize itself in its environment without any understanding of its initial pose. To accomplish this we distributed particles in a uniform distribution across the map at the Beginning of localization. This then describes the state that the robot could be anywhere in the map with similar likelihood before it can collapse its particle cloud down to a smaller set of locations.
-
-
-An example of this convergence behavior can be seen here:
-
-![A video Depiction of a point cloud algorithm collapsing to localize the robot. Possible robot locations represented by arrows start thinly distributed across a map then gradually move together and concentrate in certain areas as the robot moves around. Gradually ares get stronger until there is a cluster of Arrows following the robot](robot_localizer/gifs/ac109_1_test.gif)
-
-### Implications of this decision
-Because we chose to have a more generalized localization approach our algorithm takes longer to converge before it discovers the true location of the robot.
-
-Additionally, you can see in the gif that the particle filter can get tripped up with similar locations in that it got stuck between locating the robot at the ends of the hallways in the designated map. This is caused from the particle filter not having enough information to distinguish effectively between the two locations, where implementations which feature an initial pose do not tend to run into multiple similar conditions because they have the extra information of a starting point which will exclude possible 'similar solutions' found elsewhere in the map.
 # Robot Localization
+
+![A video Depiction of a point cloud algorithm collapsing to localize the robot. Possible robot locations represented by arrows start thinly distributed across a map then gradually move together and concentrate in certain areas as the robot moves around. Gradually ares get stronger until there is a cluster of Arrows following the robot](robot_localizer/gifs/ac109_2_test.gif)
+
+Here we see robot localization at work! Read on to understand what's happening here.
+
+## Intro
 
 This is a forked repo for the Olin Computational Robotics Robot Localization project. The authors of this write-up and implementation are:
 
@@ -27,9 +16,17 @@ This is a forked repo for the Olin Computational Robotics Robot Localization pro
 
 [Everardo Gonzalez](https://github.com/EverardoG)
 
+The goal of this project was to develop a particle filter which would allow a robot to locate itself in an environment where it has a pre-existing map of the sensor readings in the environment.
+
 ## Table of Contents
 
+[Overview](#Overview)
+
 [Our Approach](#Our-Approach)
+
+[Performance](#Performance)
+
+[Design Decisions](#Design-Decisions)
 
 [Challenges](#Challenges)
 
@@ -38,6 +35,14 @@ This is a forked repo for the Olin Computational Robotics Robot Localization pro
 [If We Had More Time...](#If-We-Had-More-Time...)
 
 <!-- How to insert gifs: ![Insert alt text here](robot_localizer/gifs/ac109_1_test.gif) -->
+
+## Overview
+
+The particle filter generates a collection of possible locations in the map that the robot could be. The particle filter then compares the sensor readings at each of these locations to the map and its own sensors to determine how 'likely' the robot is to be at each of these locations. The particle filter weights the possible locations to represent this likelihood. Then the particle filter generates a new set of possible locations around the highest weighted points from the previous round. The robot then moves around its environment and the particle filter computes where each possible location would be based on the movement the robot just executed. The particle filter then repeats the process by comparing the robot's sensor values to those at each of the possible locations.
+
+Over time the robot's possible positions estimates will converge on the most probable locations for the robot to be in the map with possible location estimates 'clustering around the most probable robot locations.
+
+Our goal was to implement one of one of these particle filters.
 
 ## Our Approach
 
@@ -60,6 +65,56 @@ We broke down our particle filter into high level steps for the *Initialization*
     2. Calculate the difference in angle between odometry and the particle.
     3. Transform the change in the odometry's x and y so that the particle moves relative to its pose in the same way the robot moved relative to the robot's pose.
 5. Update the map to odom transform that represents our best estimate of where the robot is in the map. Set the estimate equal to the pose of the particle with the highest weight.
+
+## Performance
+We tested our particle filter on four distinct maps, and visualized its performance in `rviz`. The bag files for each test are found [here](https://github.com/EverardoG/robot_localization/tree/primary/robot_localizer/bags) as `robot_localizer/bags/ac_x_test.bag`. If you want to visualize these tests yourself, you can do so by running the bag file, running rviz, and adding the following topics:
+
+- /hypotheses
+- /map_pose
+- /map
+- RobotModel (add by display type)
+
+ We can see here an explanation of what's happening in each visualization.
+
+<!-- ![A picture that serves as a reference image for what's happening in the various included gifs.](robot_localizer/pics/explain.png) -->
+
+<img src="robot_localizer/pics/explain.png" alt="A picture that serves as a reference image for what's happening in the various included gifs." width="800"/>
+
+Key:
+
+- Black lines represent walls
+- Grey tiles represent the floor
+- Red arrow represents where the robot is
+- Green arrows represent hypotheses as to where the robot _could_ be
+- The brighter the arrow, the better the hypothesis!
+- Robot Model represents where the robot _probably_ is
+
+### Map 1: ac109_1
+![A video Depiction of a point cloud algorithm collapsing to localize the robot. Possible robot locations represented by arrows start thinly distributed across a map then gradually move together and concentrate in certain areas as the robot moves around. Gradually ares get stronger until there is a cluster of Arrows following the robot](robot_localizer/gifs/ac109_1_test.gif)
+
+Here we can see that a bunch of particles begin completely outside of the bounds of the map, but they quickly converge to areas within the map. We also see this interesting behavior where the particles move towards two primary maximas where the robot is most likely to be. The particles at first tend to cluster around the wrong local maxima, but because our particle filter is not highly aggressive in its resampling, the two clusters can coexist without either dissappearing _until_ the particle filter has enough data to be certain that one of the clusters is far more probable. At that point, the two states collapse on where the robot actually is. Once the particle filter finds the robot, it seems to follow it quite well, with any particles that deviate too far from the robot being marked with a dark green, indicating that the particle filter knows that these particles are not accurate.
+
+### Map 2: ac109_2
+![A video Depiction of a point cloud algorithm collapsing to localize the robot. Possible robot locations represented by arrows start thinly distributed across a map then gradually move together and concentrate in certain areas as the robot moves around. Gradually ares get stronger until there is a cluster of Arrows following the robot](robot_localizer/gifs/ac109_2_test.gif)
+
+In this case, we again see the initial distribution of particles quickly converge to be within the bounds of the map. The biggest difference is that instead of us seeing two distinct clusters form as the particle filter attempts to localize, what we see looks far more like a long cluster of points that follows the path of the robot. Since the hallway is more or less similar in various areas of the map, this behavior makes a lot of sense. There aren't various highly distinct locations where the robot could be. There's one main corridor and the robot is _somewhere_ in that corridor. It's interesting that the particle filter becomes highly certain and highly accurate when the robot makes it all the way to the bottom right side, and it begins turning. This also makes sense as that section of the map is the most unique relative to the other locations the robot had explored. Thus, once the particle filter saw scans that matched that part of the map, it became highly certain that's where the robot was.
+
+### Map 3: ac109_3
+![A video Depiction of a point cloud algorithm collapsing to localize the robot. Possible robot locations represented by arrows start thinly distributed across a map then gradually move together and concentrate in certain areas as the robot moves around. Gradually ares get stronger until there is a cluster of Arrows following the robot](robot_localizer/gifs/ac109_3_test.gif)
+
+This was certainly one of the most challenging maps for our partcle filter. Not a single particle was initialized with a similar pose as the actual pose of the robot. In the previous maps, there were at least a few particles that were close to the actual pose of the robot, making it so that at least one initial guess was quite close. On this one however, not a single guess was even close. Since our algorithm for determining particle weight only looks at a summed set of differences lidar points and map points, it doesn't have much context for things like corners, wall angles, and slanted lines. Since all the map points are so close to every particle, every particle seems about as accurate as the next. This, combined with the poor particle initialization, leads the particle filter to initially place its best guess in entirely the wrong place. This makes sense, as it didn't have the chance to explore the space that the robot was actually in yet, and the space it found seemed pretty similar to the space the robot was in. However, once the robot started moving around the space, a few particles picked up on the robot's actual pose and slowly drew other particles towards themselves until eventually, the entire population of particles flowed to aligning themselves with the actual pose of the robot. It seems that our particle filter _will_ converge on the pose of the robot, even given poor initial conditions, so long as it has enough time to converge. Otherwise, without a decent first guess, the particle filter can't converge quickly.
+
+### Map 4: ac109_3
+![A video Depiction of a point cloud algorithm collapsing to localize the robot. Possible robot locations represented by arrows start thinly distributed across a map then gradually move together and concentrate in certain areas as the robot moves around. Gradually ares get stronger until there is a cluster of Arrows following the robot](robot_localizer/gifs/ac109_4_test.gif)
+
+This is our particle filter's worst nightmare. There are many similar looking areas, and the particles are mostly initialized in areas that seem like good estimates, even though they really aren't. With so much open space in this map, the particle filter is forced to make assumptions about what is actually in the environment, and can't find any good, unique areas to latch onto for hints. Near the end, the particles almost converge on the robot's actual position, but it all turns out to be fruitless as moving in the opposite direction seemed even more probable.
+
+## Design Decisions
+Particle filters of this type are usually used to refine a robot's position and compensate for drift They often require an initial pose estimate, an estimate which represents an approximation of the robots location and orientation in the map. We wanted the robot to be able to localize itself in its environment without any estimate of its initial pose. To accomplish this, we distributed particles uniformly across the map at the beginning of localization. This then describes the state that the robot could be anywhere in the map with similar likelihood before it can collapse its particle cloud down to a smaller set of locations.
+
+Because we chose to have a more generalized localization approach our algorithm takes longer to converge before it discovers the true location of the robot. We traded speed for generalization.
+
+Another important decision we made revolved around how we would develop our code. We decided that we wanted to visualize our particle filter as we developed it so that we could be certain each piece was behaving as expected. In this case, we traded development time for peace of mind, and in some cases, development time that would have been spent debugging.
 
 ## Challenges
 
@@ -90,7 +145,9 @@ The second behavior seemed to be due to our odometry updates. That was the only 
 <!-- TODO: add pictures here of different crappy lidar scans. -->
 
 ## Lessons Learned
+Visualize your robotics software! The fact that we had so much visualization tooling built into our codebase meant that whenever we ran into a problem with our particle filter, we could visually debug what was going wrong, or we were just a step away from being able to do so. This made our development process much smoother, especially towards the end of the project where we had only a couple parts left to finish that each provided unique challenges.
 
+Another important lesson we learned was the value of Pull Requests (PRs) and code reviews, even on small projects. While the these weren't strictly neceessary, our PRs and light code reviews helped us stay on the same page while we developed this project. If one person implemented a new feature or fixed a bug, they would put in a PR, fill out a brief description of what they changed and _explain_ face to face what they changed to the other person. Only then would they merge the changes. This ensured that we were never blindsided by any surprise changes to our codebase.
 
 ## If We Had More Time...
 
@@ -109,4 +166,3 @@ An interesting extension of that particle filter would be adding another state s
 <!-- s working properly
 
  A large porition of our approach to building out the particle filter was methodical, breaking the filter into various steps, and be. This meant that we needed robust ways of evaluating whether each step was working properly.  -->
-6e58f45b673d539f349a09b774b5f5e6a3e345f8
